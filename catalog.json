@@ -1,0 +1,27 @@
+{
+  "catalog_url": "",
+  "launcher": {
+    "repo": "",
+    "exe": "dubSuite.exe"
+  },
+  "apps": [
+    {
+      "id": "dubdsr",
+      "name": "dubDSR",
+      "mark": "DSR",
+      "summary": "Empilement GPU Soleil/Lune pour vidéos RAW SeeStar",
+      "repo": "Creations-Daniel-Dube/dubDSR",
+      "exe": "dubdsr.exe",
+      "accent": "#5b8def"
+    },
+    {
+      "id": "dubfocus",
+      "name": "dubFocus",
+      "mark": "Fo",
+      "summary": "Raffinement GPU de la mise au point pour images astronomiques",
+      "repo": "Creations-Daniel-Dube/dubFocus",
+      "exe": "dubFocus.exe",
+      "accent": "#ff9320"
+    }
+  ]
+}
