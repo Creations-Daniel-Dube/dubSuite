@@ -214,6 +214,80 @@ pub fn cleanup_staged_updater() {
     });
 }
 
+pub fn uninstall_app(id: &str) -> Result<(), String> {
+    purge_install(&state::data_dir(), id)
+}
+
+fn purge_install(root: &Path, id: &str) -> Result<(), String> {
+    if !catalog::valid_id(id) {
+        return Err(format!("Identifiant invalide : {id}."));
+    }
+    let dest = root.join("apps").join(id);
+    remove_install_dir(&dest)?;
+    let backup = dest.with_extension("old");
+    if backup.exists() {
+        let _ = remove_install_dir(&backup);
+    }
+    let tmp = root.join("tmp").join(id);
+    if tmp.exists() {
+        let _ = remove_install_dir(&tmp);
+    }
+    clear_cached_packages(root, id);
+    Ok(())
+}
+
+fn remove_install_dir(path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        fs::remove_dir_all(path).map_err(|err| state::io_fr("Désinstallation", &err))?;
+    } else if path.exists() {
+        fs::remove_file(path).map_err(|err| state::io_fr("Désinstallation", &err))?;
+    }
+    Ok(())
+}
+
+fn clear_cached_packages(root: &Path, id: &str) {
+    let cache = root.join("cache");
+    let Ok(entries) = fs::read_dir(&cache) else {
+        return;
+    };
+    let prefix = format!("{id}-");
+    let longer_ids = installed_ids(root)
+        .into_iter()
+        .filter(|other| other != id && other.len() > id.len())
+        .collect::<Vec<_>>();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().into_string().ok() else {
+            continue;
+        };
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        if !(name.ends_with(".zip") || name.ends_with(".sha256")) {
+            continue;
+        }
+        let kept_for_other = longer_ids
+            .iter()
+            .any(|other| name.starts_with(&format!("{other}-")));
+        if kept_for_other {
+            continue;
+        }
+        let _ = fs::remove_file(entry.path());
+    }
+}
+
+fn installed_ids(root: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root.join("apps")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            catalog::valid_id(&name).then_some(name)
+        })
+        .collect()
+}
+
 pub fn launch(id: &str, relative: &str) -> Result<(), String> {
     let path = installed_exe(id, relative)
         .ok_or_else(|| "Le programme installé est introuvable.".to_string())?;
@@ -521,6 +595,53 @@ mod tests {
             locate_exe(&dest, "dubdsr.exe").unwrap(),
             PathBuf::from("dubdsr.exe")
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn purge_install_removes_one_app_and_its_cache() {
+        let dir = std::env::temp_dir().join(format!(
+            "dubsuite-uninstall-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let app = dir.join("apps").join("dubdsr");
+        let other = dir.join("apps").join("dubfocus");
+        let longer = dir.join("apps").join("dubdsr-extra");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::create_dir_all(&longer).unwrap();
+        fs::write(app.join("dubdsr.exe"), b"a").unwrap();
+        fs::write(other.join("dubFocus.exe"), b"b").unwrap();
+        fs::create_dir_all(app.with_extension("old")).unwrap();
+        fs::create_dir_all(dir.join("tmp").join("dubdsr")).unwrap();
+        fs::write(dir.join("tmp").join("dubdsr").join("part"), b"t").unwrap();
+        let cache = dir.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("dubdsr-1.2.0.zip"), b"zip").unwrap();
+        fs::write(cache.join("dubdsr-1.2.0.sha256"), b"sum").unwrap();
+        fs::write(cache.join("dubfocus-1.0.0.zip"), b"keep").unwrap();
+        fs::write(cache.join("dubdsr-extra-1.0.0.zip"), b"keep-too").unwrap();
+
+        purge_install(&dir, "dubdsr").unwrap();
+
+        assert!(!app.exists());
+        assert!(!app.with_extension("old").exists());
+        assert!(!dir.join("tmp").join("dubdsr").exists());
+        assert!(!cache.join("dubdsr-1.2.0.zip").exists());
+        assert!(!cache.join("dubdsr-1.2.0.sha256").exists());
+        assert_eq!(fs::read(other.join("dubFocus.exe")).unwrap(), b"b");
+        assert_eq!(fs::read(cache.join("dubfocus-1.0.0.zip")).unwrap(), b"keep");
+        assert_eq!(
+            fs::read(cache.join("dubdsr-extra-1.0.0.zip")).unwrap(),
+            b"keep-too"
+        );
+        assert!(purge_install(&dir, "../dubdsr").is_err());
+        assert!(other.join("dubFocus.exe").is_file());
         let _ = fs::remove_dir_all(&dir);
     }
 }

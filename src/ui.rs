@@ -43,6 +43,7 @@ enum CardAction {
     Install,
     Open,
     Update,
+    Uninstall,
     Cancel,
 }
 
@@ -51,6 +52,7 @@ pub struct SuiteApp {
     state: SuiteState,
     catalog: Catalog,
     icons: std::collections::HashMap<String, egui::TextureHandle>,
+    background: Option<egui::TextureHandle>,
     source: String,
     releases: std::collections::HashMap<String, Query>,
     launcher_release: Query,
@@ -61,6 +63,7 @@ pub struct SuiteApp {
     checking: bool,
     notice: Option<Notice>,
     show_settings: bool,
+    confirm_uninstall: Option<String>,
     draft_url: String,
     draft_token: String,
     clear_token: bool,
@@ -97,6 +100,11 @@ impl SuiteApp {
         }
         let loaded = catalog::load_local();
         let icons = load_app_icons(&cc.egui_ctx);
+        let background = decode_icon(
+            &cc.egui_ctx,
+            "background",
+            include_bytes!("../images/UIbackground.png"),
+        );
         let mut releases = std::collections::HashMap::new();
         for app in &loaded.catalog.apps {
             releases.insert(app.id.clone(), Query::Checking);
@@ -107,6 +115,7 @@ impl SuiteApp {
             state: suite_state,
             catalog: loaded.catalog,
             icons,
+            background,
             source: loaded.source,
             releases,
             launcher_release: Query::Checking,
@@ -117,6 +126,7 @@ impl SuiteApp {
             checking: true,
             notice: None,
             show_settings: false,
+            confirm_uninstall: None,
             draft_url: settings.catalog_url.clone(),
             draft_token: String::new(),
             clear_token: false,
@@ -263,7 +273,33 @@ impl SuiteApp {
             }
             CardAction::Open => self.open_app(app),
             CardAction::Install | CardAction::Update => self.start_install(ctx, app),
+            CardAction::Uninstall => {
+                self.confirm_uninstall = Some(app.id.clone());
+            }
         }
+    }
+
+    fn remove_app(&mut self, id: &str) {
+        let name = self
+            .catalog
+            .apps
+            .iter()
+            .find(|app| app.id == id)
+            .map(|app| app.name.clone())
+            .unwrap_or_else(|| id.to_string());
+        if let Err(text) = install::uninstall_app(id) {
+            self.notice = Some(Notice { error: true, text });
+            return;
+        }
+        self.state.apps.remove(id);
+        if let Err(text) = state::save_state(&self.state) {
+            self.notice = Some(Notice { error: true, text });
+            return;
+        }
+        self.notice = Some(Notice {
+            error: false,
+            text: format!("{name} a été désinstallé."),
+        });
     }
 
     fn open_app(&mut self, app: &AppEntry) {
@@ -305,13 +341,17 @@ impl SuiteApp {
             ui.label(RichText::new("dubSuite").size(22.0).color(ACCENT).strong());
             ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).color(MUTED));
             let width = ui.available_width();
-            ui.allocate_ui_with_layout(egui::vec2(width, 24.0), Layout::right_to_left(Align::Center), |ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.search)
-                        .hint_text("Rechercher une application")
-                        .desired_width(260.0),
-                );
-            });
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 24.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.search)
+                            .hint_text("Rechercher une application")
+                            .desired_width(260.0),
+                    );
+                },
+            );
         });
         ui.add_space(10.0);
     }
@@ -459,15 +499,26 @@ impl SuiteApp {
                         });
                     });
                     ui.add_space(6.0);
-                    ui.add(egui::Label::new(RichText::new(&app.summary).color(MUTED).size(13.0)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(&app.summary).color(MUTED).size(13.0))
+                            .wrap(),
+                    );
                     ui.add_space(6.0);
                     let (line, color) = status_line(&query);
                     ui.add(egui::Label::new(RichText::new(line).color(color).size(12.0)).wrap());
                     if let Some(installed) = &installed {
-                        ui.label(RichText::new(format!("Installée : {}", installed.version)).color(MUTED).size(12.0));
+                        ui.label(
+                            RichText::new(format!("Installée : {}", installed.version))
+                                .color(MUTED)
+                                .size(12.0),
+                        );
                         if let Query::Ready(info) = &query {
                             if github::is_newer(&installed.version, &info.version) {
-                                ui.label(RichText::new("La version installée est plus récente.").color(MUTED).size(12.0));
+                                ui.label(
+                                    RichText::new("La version installée est plus récente.")
+                                        .color(MUTED)
+                                        .size(12.0),
+                                );
                             }
                         }
                     }
@@ -565,6 +616,56 @@ impl SuiteApp {
         self.show_settings = open;
     }
 
+    fn uninstall_dialog(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.confirm_uninstall.clone() else {
+            return;
+        };
+        let name = self
+            .catalog
+            .apps
+            .iter()
+            .find(|app| app.id == id)
+            .map(|app| app.name.clone())
+            .unwrap_or_else(|| id.clone());
+        let mut dismiss = false;
+        let mut confirm = false;
+        let response = egui::Modal::new(egui::Id::unique("uninstall-app"))
+            .frame(
+                Frame::NONE
+                    .fill(CARD)
+                    .stroke(Stroke::new(1.0, CARD_LINE))
+                    .corner_radius(8.0)
+                    .inner_margin(16.0),
+            )
+            .show(ctx, |ui| {
+                ui.set_min_width(340.0);
+                ui.label(RichText::new("Désinstaller").size(16.0).strong());
+                ui.add_space(8.0);
+                ui.label(format!("Supprimer {name} de cet ordinateur ?"));
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Les fichiers installés seront effacés.")
+                        .color(MUTED)
+                        .size(12.0),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Annuler").clicked() {
+                        dismiss = true;
+                    }
+                    if centered_button(ui, true, "Désinstaller", None).clicked() {
+                        confirm = true;
+                    }
+                });
+            });
+        if confirm {
+            self.confirm_uninstall = None;
+            self.remove_app(&id);
+        } else if dismiss || response.should_close() {
+            self.confirm_uninstall = None;
+        }
+    }
+
     fn save_settings(&mut self, ctx: &egui::Context) {
         let url = self.draft_url.trim().to_string();
         if let Err(err) = state::check_catalog_url(&url) {
@@ -591,18 +692,38 @@ impl SuiteApp {
         });
         self.refresh(ctx);
     }
+
+    fn paint_background(&self, ui: &egui::Ui) {
+        let Some(texture) = &self.background else {
+            return;
+        };
+        let rect = ui.max_rect();
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
+            return;
+        }
+        let [width, height] = texture.size();
+        if width == 0 || height == 0 {
+            return;
+        }
+        let uv = cover_uv(width as f32 / height as f32, rect.width() / rect.height());
+        egui::Image::from_texture(texture)
+            .uv(uv)
+            .paint_at(ui, rect);
+    }
 }
 
 impl eframe::App for SuiteApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll();
+        self.paint_background(ui);
         self.settings_window(&ctx);
+        self.uninstall_dialog(&ctx);
         egui::Panel::bottom("status")
-            .frame(Frame::NONE.fill(BG).inner_margin(12.0))
+            .frame(Frame::NONE.fill(Color32::TRANSPARENT).inner_margin(12.0))
             .show(ui, |ui| self.footer(ui, &ctx));
         egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(BG).inner_margin(16.0))
+            .frame(Frame::NONE.fill(Color32::TRANSPARENT).inner_margin(16.0))
             .show(ui, |ui| {
                 self.header(ui);
                 self.banner(ui, &ctx);
@@ -630,38 +751,71 @@ fn card_buttons(
         }
         return None;
     }
-    match query {
-        Query::Checking => {
+    match (query, installed) {
+        (_, Some(local)) => {
+            let can_update = match query {
+                Query::Ready(info) => github::is_newer(&info.version, &local.version),
+                _ => false,
+            };
+            installed_buttons(ui, can_update, busy)
+        }
+        (Query::Checking, None) => {
             let _ = wide_button(ui, false, "VÉRIFICATION…");
             None
         }
-        Query::Failed(_) | Query::Missing => {
+        (Query::Failed(_) | Query::Missing, None) => {
             let _ = wide_button(ui, false, "INDISPONIBLE");
             None
         }
-        Query::Ready(info) => match installed {
-            None => wide_button(ui, !busy, "INSTALLER").then_some(CardAction::Install),
-            Some(local) if github::is_newer(&info.version, &local.version) => {
-                let mut action = None;
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            !busy,
-                            egui::Button::new(RichText::new("METTRE À JOUR").color(ACCENT)),
-                        )
-                        .clicked()
-                    {
-                        action = Some(CardAction::Update);
-                    }
-                    if ui.button("OUVRIR").clicked() {
-                        action = Some(CardAction::Open);
-                    }
-                });
-                action
-            }
-            Some(_) => wide_button(ui, true, "OUVRIR").then_some(CardAction::Open),
-        },
+        (Query::Ready(_), None) => {
+            wide_button(ui, !busy, "INSTALLER").then_some(CardAction::Install)
+        }
     }
+}
+
+fn installed_buttons(ui: &mut egui::Ui, can_update: bool, busy: bool) -> Option<CardAction> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        if can_update
+            && ui
+                .add_enabled(
+                    !busy,
+                    egui::Button::new(RichText::new("METTRE À JOUR").color(ACCENT)),
+                )
+                .clicked()
+        {
+            action = Some(CardAction::Update);
+        }
+        let width = ui.available_width();
+        if ui
+            .add_sized(Vec2::new(width, 28.0), egui::Button::new("OUVRIR"))
+            .clicked()
+        {
+            action = Some(CardAction::Open);
+        }
+    });
+    ui.add_space(4.0);
+    if centered_button(ui, !busy, "DÉSINSTALLER", Some(ui.available_width())).clicked() {
+        action = Some(CardAction::Uninstall);
+    }
+    action
+}
+
+fn centered_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    label: &str,
+    width: Option<f32>,
+) -> egui::Response {
+    let mut button = egui::Button::new((
+        egui::Atom::grow(),
+        RichText::new(label).color(DANGER),
+        egui::Atom::grow(),
+    ));
+    if let Some(width) = width {
+        button = button.min_size(Vec2::new(width, 24.0));
+    }
+    ui.add_enabled(enabled, button)
 }
 
 fn wide_button(ui: &mut egui::Ui, enabled: bool, text: impl Into<egui::WidgetText>) -> bool {
@@ -749,6 +903,18 @@ fn load_app_icons(ctx: &egui::Context) -> std::collections::HashMap<String, egui
         icons.insert((*id).to_string(), texture);
     }
     icons
+}
+
+fn cover_uv(image_aspect: f32, rect_aspect: f32) -> egui::Rect {
+    if rect_aspect > image_aspect {
+        let shown = image_aspect / rect_aspect;
+        let margin = (1.0 - shown) * 0.5;
+        egui::Rect::from_min_max(egui::pos2(0.0, margin), egui::pos2(1.0, 1.0 - margin))
+    } else {
+        let shown = rect_aspect / image_aspect;
+        let margin = (1.0 - shown) * 0.5;
+        egui::Rect::from_min_max(egui::pos2(margin, 0.0), egui::pos2(1.0 - margin, 1.0))
+    }
 }
 
 fn decode_icon(ctx: &egui::Context, id: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {

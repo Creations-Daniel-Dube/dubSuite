@@ -95,7 +95,9 @@ pub fn version_from_tag(tag: &str) -> Result<String, String> {
     if let Some(version) = embedded_semver(trimmed) {
         return Ok(version);
     }
-    Err(format!("Le tag « {tag} » n'est pas une version, par exemple v1.2.50."))
+    Err(format!(
+        "Le tag « {tag} » n'est pas une version, par exemple v1.2.50."
+    ))
 }
 
 fn embedded_semver(text: &str) -> Option<String> {
@@ -174,11 +176,17 @@ fn select_release(release: &GhRelease, tags: &[String]) -> Result<ReleaseInfo, S
 }
 
 fn select_package<'a>(assets: &'a [GhAsset], tags: &[String]) -> Result<&'a GhAsset, String> {
-    let zips: Vec<&GhAsset> = assets.iter().filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip")).collect();
+    let zips: Vec<&GhAsset> = assets
+        .iter()
+        .filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip"))
+        .collect();
     if !zips.is_empty() {
         return select_named(&zips, tags);
     }
-    let programs: Vec<&GhAsset> = assets.iter().filter(|asset| is_program(&asset.name)).collect();
+    let programs: Vec<&GhAsset> = assets
+        .iter()
+        .filter(|asset| is_program(&asset.name))
+        .collect();
     if programs.is_empty() {
         return Err("Aucun fichier .zip ni programme dans cette version.".to_string());
     }
@@ -205,7 +213,10 @@ fn select_named<'a>(files: &[&'a GhAsset], tags: &[String]) -> Result<&'a GhAsse
         let score = tags
             .iter()
             .enumerate()
-            .filter_map(|(index, tag)| name.contains(&tag.to_ascii_lowercase()).then_some(tags.len() - index))
+            .filter_map(|(index, tag)| {
+                name.contains(&tag.to_ascii_lowercase())
+                    .then_some(tags.len() - index)
+            })
             .max()
             .unwrap_or(0);
         if score > best_score {
@@ -220,18 +231,30 @@ fn select_named<'a>(files: &[&'a GhAsset], tags: &[String]) -> Result<&'a GhAsse
         if best.len() == 1 {
             return Ok(best[0]);
         }
-        return Err(format!("Plusieurs paquets correspondent : {}.", joined_names(&best)));
+        return Err(format!(
+            "Plusieurs paquets correspondent : {}.",
+            joined_names(&best)
+        ));
     }
     if files.len() == 1 {
         return Ok(files[0]);
     }
-    let wanted = tags.first().map(String::as_str).unwrap_or("cette plateforme");
-    Err(format!("Aucun paquet pour {wanted} parmi : {}.", joined_names(files)))
+    let wanted = tags
+        .first()
+        .map(String::as_str)
+        .unwrap_or("cette plateforme");
+    Err(format!(
+        "Aucun paquet pour {wanted} parmi : {}.",
+        joined_names(files)
+    ))
 }
 
 #[cfg(test)]
 pub fn select_zip<'a>(assets: &'a [GhAsset], tags: &[String]) -> Result<&'a GhAsset, String> {
-    let zips: Vec<&GhAsset> = assets.iter().filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip")).collect();
+    let zips: Vec<&GhAsset> = assets
+        .iter()
+        .filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip"))
+        .collect();
     if zips.is_empty() {
         return Err("Aucun fichier .zip dans cette version.".to_string());
     }
