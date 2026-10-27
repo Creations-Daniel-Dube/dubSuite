@@ -50,6 +50,7 @@ pub struct SuiteApp {
     settings: Settings,
     state: SuiteState,
     catalog: Catalog,
+    icons: std::collections::HashMap<String, egui::TextureHandle>,
     source: String,
     releases: std::collections::HashMap<String, Query>,
     launcher_release: Query,
@@ -95,6 +96,7 @@ impl SuiteApp {
             let _ = state::save_state(&suite_state);
         }
         let loaded = catalog::load_local();
+        let icons = load_app_icons(&cc.egui_ctx);
         let mut releases = std::collections::HashMap::new();
         for app in &loaded.catalog.apps {
             releases.insert(app.id.clone(), Query::Checking);
@@ -104,6 +106,7 @@ impl SuiteApp {
             settings: settings.clone(),
             state: suite_state,
             catalog: loaded.catalog,
+            icons,
             source: loaded.source,
             releases,
             launcher_release: Query::Checking,
@@ -437,7 +440,6 @@ impl SuiteApp {
             .map(|job| (job.label.clone(), job.fraction));
         let busy = self.job.is_some();
         let accent = parse_accent(&app.accent).unwrap_or(ACCENT);
-        let mark = catalog::mark_of(app);
         let mut action = None;
 
         Frame::NONE
@@ -450,7 +452,7 @@ impl SuiteApp {
                     ui.set_width(288.0);
                     ui.set_min_height(146.0);
                     ui.horizontal(|ui| {
-                        mark_tile(ui, accent, &mark);
+                        self.app_badge(ui, app, accent);
                         ui.label(RichText::new(&app.name).size(16.0).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(RichText::new(badge(&query)).color(ACCENT).strong());
@@ -474,6 +476,19 @@ impl SuiteApp {
                 });
             });
         action
+    }
+
+    fn app_badge(&self, ui: &mut egui::Ui, app: &AppEntry, accent: Color32) {
+        let Some(texture) = self.icons.get(&app.id) else {
+            mark_tile(ui, accent, &catalog::mark_of(app));
+            return;
+        };
+        ui.add(
+            egui::Image::from_texture(texture)
+                .fit_to_exact_size(Vec2::splat(36.0))
+                .corner_radius(6.0)
+                .bg_fill(CARD),
+        );
     }
 
     fn footer(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -719,6 +734,32 @@ fn parse_accent(hex: &str) -> Option<Color32> {
     let green = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let blue = u8::from_str_radix(&hex[4..6], 16).ok()?;
     Some(Color32::from_rgb(red, green, blue))
+}
+
+fn load_app_icons(ctx: &egui::Context) -> std::collections::HashMap<String, egui::TextureHandle> {
+    const ICONS: &[(&str, &[u8])] = &[
+        ("dubdsr", include_bytes!("../images/dubdsr.png")),
+        ("dubfocus", include_bytes!("../images/dubFocus.png")),
+    ];
+    let mut icons = std::collections::HashMap::new();
+    for (id, bytes) in ICONS {
+        let Some(texture) = decode_icon(ctx, id, bytes) else {
+            continue;
+        };
+        icons.insert((*id).to_string(), texture);
+    }
+    icons
+}
+
+fn decode_icon(ctx: &egui::Context, id: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+    Some(ctx.load_texture(
+        format!("app-icon-{id}"),
+        color,
+        egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
+    ))
 }
 
 fn mark_tile(ui: &mut egui::Ui, accent: Color32, mark: &str) {
