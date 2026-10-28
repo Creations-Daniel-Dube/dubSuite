@@ -161,18 +161,11 @@ pub fn stage_launcher(
 pub fn apply_staged_update(target: &Path) -> Result<(), String> {
     let me =
         std::env::current_exe().map_err(|err| state::io_fr("Programme de mise à jour", &err))?;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        match fs::copy(&me, target) {
-            Ok(_) => break,
-            Err(err)
-                if err.kind() == std::io::ErrorKind::PermissionDenied
-                    && Instant::now() < deadline =>
-            {
-                std::thread::sleep(Duration::from_millis(300));
-            }
-            Err(err) => return Err(state::io_fr("Remplacement du lanceur", &err)),
-        }
+    let parked = parked_update_path(target);
+    move_running_aside(target, &parked)?;
+    if let Err(err) = fs::copy(&me, target) {
+        let _ = fs::rename(&parked, target);
+        return Err(state::io_fr("Remplacement du lanceur", &err));
     }
     #[cfg(unix)]
     {
@@ -182,7 +175,48 @@ pub fn apply_staged_update(target: &Path) -> Result<(), String> {
     std::process::Command::new(target)
         .spawn()
         .map_err(|err| state::io_fr("Relance du lanceur", &err))?;
+    let _ = fs::remove_file(&parked);
     Ok(())
+}
+
+fn parked_update_path(target: &Path) -> PathBuf {
+    let name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("dubSuite.exe");
+    target.with_file_name(format!("{name}.old"))
+}
+
+/// Windows refuse d'écraser un programme encore ouvert (erreur 32),
+/// mais accepte de le renommer. L'ancien fichier est mis de côté.
+fn move_running_aside(target: &Path, parked: &Path) -> Result<(), String> {
+    if !target.exists() {
+        return Ok(());
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if parked.exists() {
+            match fs::remove_file(parked) {
+                Ok(()) => {}
+                Err(err) if file_is_locked(&err) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(300));
+                    continue;
+                }
+                Err(err) => return Err(state::io_fr("Remplacement du lanceur", &err)),
+            }
+        }
+        match fs::rename(target, parked) {
+            Ok(()) => return Ok(()),
+            Err(err) if file_is_locked(&err) && Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            Err(err) => return Err(state::io_fr("Remplacement du lanceur", &err)),
+        }
+    }
+}
+
+fn file_is_locked(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::PermissionDenied || matches!(err.raw_os_error(), Some(32 | 33))
 }
 
 pub fn staged_update_path(current_exe: &Path) -> PathBuf {
@@ -200,16 +234,19 @@ pub fn cleanup_staged_updater() {
     let Some(name) = me.file_name().and_then(|name| name.to_str()) else {
         return;
     };
-    if name.ends_with(".new") {
+    if name.ends_with(".new") || name.ends_with(".old") {
         return;
     }
     let staged = me.with_file_name(format!("{name}.new"));
+    let parked = me.with_file_name(format!("{name}.old"));
     std::thread::spawn(move || {
-        for _ in 0..20 {
-            if !staged.exists() || fs::remove_file(&staged).is_ok() {
-                break;
+        for path in [staged, parked] {
+            for _ in 0..40 {
+                if !path.exists() || fs::remove_file(&path).is_ok() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
             }
-            std::thread::sleep(Duration::from_millis(250));
         }
     });
 }
@@ -569,6 +606,18 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sharing_violation_counts_as_a_locked_program() {
+        let sharing = std::io::Error::from_raw_os_error(32);
+        let locked = std::io::Error::from_raw_os_error(33);
+        let denied = std::io::Error::from_raw_os_error(5);
+        let missing = std::io::Error::from_raw_os_error(2);
+        assert!(file_is_locked(&sharing));
+        assert!(file_is_locked(&locked));
+        assert!(file_is_locked(&denied));
+        assert!(!file_is_locked(&missing));
+    }
 
     #[test]
     fn extract_keeps_the_exe_and_skips_parent_paths() {
