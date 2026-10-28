@@ -7,11 +7,11 @@
   "categories": [
     {
       "id": "cuda",
-      "title": "Carte vidéo Nvidia (CUDA) requise !!!"
+      "title": "ATTENTION :Carte vidéo Nvidia (CUDA) requise !!!"
     },
     {
       "id": "general",
-      "title": "Utilitaires astronomiques"
+      "title": "Utilitaires astronomiques sans pré-requis"
     },
     {
       "id": "bientot",
