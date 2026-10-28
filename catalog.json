@@ -4,6 +4,20 @@
     "repo": "",
     "exe": "dubSuite.exe"
   },
+  "categories": [
+    {
+      "id": "cuda",
+      "title": "Carte vidéo Nvidia (CUDA) requise !!!"
+    },
+    {
+      "id": "general",
+      "title": "Utilitaires astronomiques"
+    },
+    {
+      "id": "bientot",
+      "title": "À VENIR !"
+    }
+  ],
   "apps": [
     {
       "id": "dubdsr",
@@ -12,7 +26,8 @@
       "summary": "Empilement GPU Soleil/Lune pour vidéos RAW SeeStar",
       "repo": "Creations-Daniel-Dube/dubDSR",
       "exe": "dubdsr.exe",
-      "accent": "#5b8def"
+      "accent": "#5b8def",
+      "category": "cuda"
     },
     {
       "id": "dubfocus",
@@ -21,7 +36,38 @@
       "summary": "Raffinement GPU de la mise au point pour images astronomiques",
       "repo": "Creations-Daniel-Dube/dubFocus",
       "exe": "dubFocus.exe",
-      "accent": "#ff9320"
+      "accent": "#ff9320",
+      "category": "cuda"
+    },
+    {
+      "id": "dubGPUStack",
+      "name": "dubGPUStack (À VENIR)",
+      "mark": "Gs",
+      "summary": "Empilement images astronomiques accéléré avec GPU",
+      "repo": "Creations-Daniel-Dube/dubGPUStack",
+      "exe": "dubGPUStack.exe",
+      "accent": "#ff9320",
+      "category": "bientot"
+    },
+    {
+      "id": "dubSeeStar",
+      "name": "dubSeeStar (À VENIR)",
+      "mark": "dSS",
+      "summary": "Application de contrôle SeeStar Windows/Linux",
+      "repo": "Creations-Daniel-Dube/dubSeeStar",
+      "exe": "dubGPUStack.exe",
+      "accent": "#ff9320",
+      "category": "bientot"
+    },
+    {
+      "id": "dubDSLR",
+      "name": "dubDSLR (À VENIR)",
+      "mark": "dSS",
+      "summary": "Application de contrôle dubDSLR Windows/Linux",
+      "repo": "Creations-Daniel-Dube/dubDSLR",
+      "exe": "dubDSLR.exe",
+      "accent": "#ff9320",
+      "category": "bientot"
     }
   ]
 }

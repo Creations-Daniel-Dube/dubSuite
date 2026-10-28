@@ -7,13 +7,24 @@ use crate::state::{self, Settings};
 
 const EMBEDDED: &str = include_str!("../catalog.json");
 
+pub const GENERAL_CATEGORY_ID: &str = "general";
+pub const GENERAL_CATEGORY_TITLE: &str = "Applications générales";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Catalog {
     #[serde(default)]
     pub catalog_url: String,
     #[serde(default)]
     pub launcher: LauncherMeta,
+    #[serde(default)]
+    pub categories: Vec<Category>,
     pub apps: Vec<AppEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Category {
+    pub id: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +62,15 @@ pub struct AppEntry {
     pub exe_linux: String,
     #[serde(default)]
     pub accent: String,
+    #[serde(default)]
+    pub category: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AppGroup<'a> {
+    pub id: &'a str,
+    pub title: &'a str,
+    pub apps: Vec<&'a AppEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +187,49 @@ pub fn host_launcher_exe(launcher: &LauncherMeta) -> String {
     }
 }
 
+/// Regroupe les applications dans l'ordre des catégories.
+/// Une catégorie sans application est omise.
+/// Sans catégorie, ou avec un identifiant inconnu, l'application rejoint
+/// « Applications générales » si cette catégorie existe, sinon une section de repli.
+pub fn group_apps<'a>(categories: &'a [Category], apps: &'a [AppEntry]) -> Vec<AppGroup<'a>> {
+    let mut buckets: Vec<Vec<&'a AppEntry>> = vec![Vec::new(); categories.len()];
+    let mut fallback = Vec::new();
+    let general = categories
+        .iter()
+        .position(|category| category.id == GENERAL_CATEGORY_ID);
+
+    for app in apps {
+        let id = app.category.trim();
+        if let Some(index) = categories.iter().position(|category| category.id == id) {
+            buckets[index].push(app);
+        } else if let Some(index) = general {
+            buckets[index].push(app);
+        } else {
+            fallback.push(app);
+        }
+    }
+
+    let mut groups = Vec::new();
+    for (category, apps) in categories.iter().zip(buckets) {
+        if apps.is_empty() {
+            continue;
+        }
+        groups.push(AppGroup {
+            id: &category.id,
+            title: &category.title,
+            apps,
+        });
+    }
+    if !fallback.is_empty() {
+        groups.push(AppGroup {
+            id: GENERAL_CATEGORY_ID,
+            title: GENERAL_CATEGORY_TITLE,
+            apps: fallback,
+        });
+    }
+    groups
+}
+
 pub fn mark_of(app: &AppEntry) -> String {
     let explicit = app.mark.trim();
     if !explicit.is_empty() {
@@ -231,6 +294,24 @@ fn exe_is_in_target(dir: &Path) -> bool {
 fn validate(catalog: &Catalog) -> Result<(), String> {
     if catalog.apps.len() > 100 {
         return Err("Le catalogue dépasse 100 applications.".to_string());
+    }
+    let mut seen_categories = std::collections::BTreeSet::new();
+    for category in &catalog.categories {
+        if !valid_id(&category.id) {
+            return Err(format!(
+                "Identifiant de catégorie invalide : {}",
+                category.id
+            ));
+        }
+        if !seen_categories.insert(category.id.clone()) {
+            return Err(format!(
+                "Identifiant de catégorie en double : {}",
+                category.id
+            ));
+        }
+        if category.title.trim().is_empty() {
+            return Err(format!("La catégorie {} n'a pas de titre.", category.id));
+        }
     }
     let mut seen = std::collections::BTreeSet::new();
     for app in &catalog.apps {
@@ -315,6 +396,86 @@ mod tests {
         assert_eq!(ids, ["dubdsr", "dubfocus"]);
         assert!(valid_repo(&catalog.apps[0].repo));
         assert!(valid_repo(&catalog.apps[1].repo));
+        assert!(catalog.apps.iter().all(|app| app.category == "cuda"));
+        let groups = group_apps(&catalog.categories, &catalog.apps);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "cuda");
+        assert_eq!(groups[0].title, "Carte vidéo Nvidia (CUDA) requise");
+        let grouped: Vec<_> = groups[0].apps.iter().map(|app| app.id.as_str()).collect();
+        assert_eq!(grouped, ["dubdsr", "dubfocus"]);
+    }
+
+    #[test]
+    fn missing_or_unknown_category_joins_general() {
+        let text = r#"{
+            "categories": [
+                { "id": "cuda", "title": "CUDA" },
+                { "id": "general", "title": "Applications générales" }
+            ],
+            "apps": [
+                {
+                    "id": "a",
+                    "name": "A",
+                    "repo": "DarthDub66/dubFocus",
+                    "exe": "a.exe",
+                    "category": "cuda"
+                },
+                {
+                    "id": "b",
+                    "name": "B",
+                    "repo": "DarthDub66/dubFocus",
+                    "exe": "b.exe"
+                },
+                {
+                    "id": "c",
+                    "name": "C",
+                    "repo": "DarthDub66/dubFocus",
+                    "exe": "c.exe",
+                    "category": "inconnu"
+                }
+            ]
+        }"#;
+        let catalog = parse_catalog(text).unwrap();
+        let groups = group_apps(&catalog.categories, &catalog.apps);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].id, "cuda");
+        assert_eq!(groups[0].apps[0].id, "a");
+        assert_eq!(groups[1].id, "general");
+        assert_eq!(groups[1].title, "Applications générales");
+        let ids: Vec<_> = groups[1].apps.iter().map(|app| app.id.as_str()).collect();
+        assert_eq!(ids, ["b", "c"]);
+    }
+
+    #[test]
+    fn unknown_category_uses_a_fallback_section() {
+        let text = r#"{
+            "categories": [{ "id": "cuda", "title": "CUDA" }],
+            "apps": [{
+                "id": "a",
+                "name": "A",
+                "repo": "DarthDub66/dubFocus",
+                "exe": "a.exe",
+                "category": "autre"
+            }]
+        }"#;
+        let catalog = parse_catalog(text).unwrap();
+        let groups = group_apps(&catalog.categories, &catalog.apps);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, GENERAL_CATEGORY_ID);
+        assert_eq!(groups[0].title, GENERAL_CATEGORY_TITLE);
+        assert_eq!(groups[0].apps[0].id, "a");
+    }
+
+    #[test]
+    fn rejects_a_duplicate_category() {
+        let text = r#"{
+            "categories": [
+                { "id": "cuda", "title": "CUDA" },
+                { "id": "cuda", "title": "Encore CUDA" }
+            ],
+            "apps": []
+        }"#;
+        assert!(parse_catalog(text).is_err());
     }
 
     #[test]

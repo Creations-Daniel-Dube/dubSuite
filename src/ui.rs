@@ -18,6 +18,8 @@ const TEXT: Color32 = Color32::from_rgb(0xf2, 0xf2, 0xf4);
 const MUTED: Color32 = Color32::from_rgb(0xa0, 0xa0, 0xaa);
 const ACCENT: Color32 = Color32::from_rgb(0xe6, 0xa8, 0x17);
 const DANGER: Color32 = Color32::from_rgb(0xe0, 0x6a, 0x5a);
+const CATEGORY_CUDA: Color32 = Color32::from_rgb(0xff, 0x3b, 0x3b);
+const CATEGORY_GENERAL: Color32 = Color32::from_rgb(0x3d, 0xd6, 0x6c);
 
 #[derive(Clone)]
 enum Query {
@@ -443,24 +445,38 @@ impl SuiteApp {
             ui.label(RichText::new("Aucune application ne correspond.").color(MUTED));
             return;
         }
+        let categories = self.catalog.categories.clone();
+        let groups = catalog::group_apps(&categories, &apps);
         let gap = 12.0;
         let cols = ((ui.available_width() + gap) / (300.0 + gap))
             .floor()
             .max(1.0) as usize;
         let mut pending = Vec::new();
-        egui::Grid::new("apps")
-            .num_columns(cols)
-            .spacing([gap, gap])
-            .show(ui, |ui| {
-                for (index, app) in apps.iter().enumerate() {
-                    if let Some(action) = self.card(ui, app) {
-                        pending.push((app.clone(), action));
+        for (index, group) in groups.iter().enumerate() {
+            if index > 0 {
+                ui.add_space(18.0);
+            }
+            ui.label(
+                RichText::new(group.title)
+                    .color(category_title_color(group.id))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            egui::Grid::new(("apps", group.id))
+                .num_columns(cols)
+                .spacing([gap, gap])
+                .show(ui, |ui| {
+                    for (card_index, app) in group.apps.iter().enumerate() {
+                        if let Some(action) = self.card(ui, app) {
+                            pending.push(((*app).clone(), action));
+                        }
+                        if (card_index + 1) % cols == 0 {
+                            ui.end_row();
+                        }
                     }
-                    if (index + 1) % cols == 0 {
-                        ui.end_row();
-                    }
-                }
-            });
+                });
+        }
         for (app, action) in pending {
             self.perform(ctx, &app, action);
         }
@@ -839,6 +855,14 @@ fn show_progress(ui: &mut egui::Ui, fraction: Option<f32>, label: &str) {
                 ui.label("en cours");
             });
         }
+    }
+}
+
+fn category_title_color(id: &str) -> Color32 {
+    match id {
+        "cuda" => CATEGORY_CUDA,
+        catalog::GENERAL_CATEGORY_ID => CATEGORY_GENERAL,
+        _ => MUTED,
     }
 }
 
