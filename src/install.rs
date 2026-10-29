@@ -84,6 +84,7 @@ pub fn install_app(
             let _ = fs::remove_dir_all(&tmp);
             return Run::Failed(err);
         }
+        ensure_executable(&dest.join(&relative));
         let _ = fs::remove_file(&zip_path);
         let _ = fs::remove_file(&sum_path);
         return Run::Done(Installed {
@@ -100,6 +101,7 @@ pub fn install_app(
     if let Err(err) = fs::copy(&zip_path, &target) {
         return Run::Failed(state::io_fr("Installation", &err));
     }
+    ensure_executable(&target);
     let _ = fs::remove_file(&zip_path);
     let _ = fs::remove_file(&sum_path);
     Run::Done(Installed {
@@ -328,6 +330,7 @@ fn installed_ids(root: &Path) -> Vec<String> {
 pub fn launch(id: &str, relative: &str) -> Result<(), String> {
     let path = installed_exe(id, relative)
         .ok_or_else(|| "Le programme installé est introuvable.".to_string())?;
+    ensure_executable(&path);
     let mut command = std::process::Command::new(&path);
     if let Some(dir) = path.parent() {
         command.current_dir(dir);
@@ -380,12 +383,41 @@ pub fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent).map_err(|err| state::io_fr("Dossier du paquet", &err))?;
         }
+        let unix_mode = entry.unix_mode();
         let mut output =
             fs::File::create(&out).map_err(|err| state::io_fr("Fichier du paquet", &err))?;
         std::io::copy(&mut entry, &mut output)
             .map_err(|err| state::io_fr("Fichier du paquet", &err))?;
+        drop(output);
+        apply_extracted_mode(&out, unix_mode);
     }
     Ok(())
+}
+
+fn ensure_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+fn apply_extracted_mode(path: &Path, unix_mode: Option<u32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(mode) = unix_mode {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, unix_mode);
+    }
 }
 
 pub fn locate_exe(root: &Path, exe_name: &str) -> Result<PathBuf, String> {
@@ -643,6 +675,35 @@ mod tests {
         assert_eq!(
             locate_exe(&dest, "dubdsr.exe").unwrap(),
             PathBuf::from("dubdsr.exe")
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_executable_sets_the_user_execute_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "dubsuite-exec-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dubdsr");
+        fs::write(&path, b"not-a-real-binary").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o111,
+            0
+        );
+        ensure_executable(&path);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o111,
+            0o111
         );
         let _ = fs::remove_dir_all(&dir);
     }
