@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use reqwest::blocking::Client;
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,10 +70,7 @@ pub fn fetch_latest(repo: &str, token: &str) -> Result<Option<ReleaseInfo>, Stri
     let release: GhRelease = response
         .json()
         .map_err(|err| format!("Réponse GitHub illisible : {err}"))?;
-    match select_release(&release, &platform_tags()) {
-        Ok(info) => Ok(Some(info)),
-        Err(err) => Err(err),
-    }
+    select_release(&release, &platform_tags())
 }
 
 pub fn platform_tags() -> Vec<String> {
@@ -159,11 +156,17 @@ pub fn french_date(iso: &str) -> String {
     }
 }
 
-fn select_release(release: &GhRelease, tags: &[String]) -> Result<ReleaseInfo, String> {
+const OS_MARKERS: &[&str] = &[
+    "windows", "win64", "win32", "linux", "macos", "darwin", "osx",
+];
+
+fn select_release(release: &GhRelease, tags: &[String]) -> Result<Option<ReleaseInfo>, String> {
     let version = version_from_tag(&release.tag_name)?;
-    let package = select_package(&release.assets, tags)?;
+    let Some(package) = select_package(&release.assets, tags)? else {
+        return Ok(None);
+    };
     let checksum = checksum_asset(&release.assets, &package.name).cloned();
-    Ok(ReleaseInfo {
+    Ok(Some(ReleaseInfo {
         version,
         published_label: release
             .published_at
@@ -172,10 +175,13 @@ fn select_release(release: &GhRelease, tags: &[String]) -> Result<ReleaseInfo, S
             .unwrap_or_else(|| "—".to_string()),
         package: remote_file(package),
         checksum: checksum.as_ref().map(remote_file),
-    })
+    }))
 }
 
-fn select_package<'a>(assets: &'a [GhAsset], tags: &[String]) -> Result<&'a GhAsset, String> {
+fn select_package<'a>(
+    assets: &'a [GhAsset],
+    tags: &[String],
+) -> Result<Option<&'a GhAsset>, String> {
     let zips: Vec<&GhAsset> = assets
         .iter()
         .filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip"))
@@ -185,27 +191,27 @@ fn select_package<'a>(assets: &'a [GhAsset], tags: &[String]) -> Result<&'a GhAs
     }
     let programs: Vec<&GhAsset> = assets
         .iter()
-        .filter(|asset| is_program(&asset.name))
+        .filter(|asset| is_program(&asset.name, tags))
         .collect();
     if programs.is_empty() {
-        return Err("Aucun fichier .zip ni programme dans cette version.".to_string());
+        return Ok(None);
     }
     select_named(&programs, tags)
 }
 
-fn is_program(name: &str) -> bool {
+fn is_program(name: &str, tags: &[String]) -> bool {
     let name = name.to_ascii_lowercase();
     if name.ends_with(".sha256") || name == "checksums.txt" || name == "sha256sums" {
         return false;
     }
-    if cfg!(windows) {
+    if host_os(tags) == "windows" {
         name.ends_with(".exe")
     } else {
         !name.contains('.')
     }
 }
 
-fn select_named<'a>(files: &[&'a GhAsset], tags: &[String]) -> Result<&'a GhAsset, String> {
+fn select_named<'a>(files: &[&'a GhAsset], tags: &[String]) -> Result<Option<&'a GhAsset>, String> {
     let mut best: Vec<&GhAsset> = Vec::new();
     let mut best_score = 0usize;
     for asset in files {
@@ -229,34 +235,72 @@ fn select_named<'a>(files: &[&'a GhAsset], tags: &[String]) -> Result<&'a GhAsse
     }
     if best_score > 0 {
         if best.len() == 1 {
-            return Ok(best[0]);
+            return Ok(Some(best[0]));
         }
         return Err(format!(
             "Plusieurs paquets correspondent : {}.",
             joined_names(&best)
         ));
     }
-    if files.len() == 1 {
-        return Ok(files[0]);
+    // Un paquet sans marque d'OS n'est accepté que sous Windows
+    // (les anciennes releases n'avaient qu'un zip). Linux et macOS
+    // exigent un nom du type « linux-x64 » ou « macos-arm64 ».
+    let untagged: Vec<&GhAsset> = files
+        .iter()
+        .copied()
+        .filter(|asset| !marks_other_os(&asset.name, tags))
+        .collect();
+    if host_os(tags) == "windows" && untagged.len() == 1 {
+        return Ok(Some(untagged[0]));
     }
-    let wanted = tags
-        .first()
-        .map(String::as_str)
-        .unwrap_or("cette plateforme");
-    Err(format!(
-        "Aucun paquet pour {wanted} parmi : {}.",
-        joined_names(files)
-    ))
+    Ok(None)
+}
+
+fn host_os(tags: &[String]) -> &str {
+    os_family(tags.last().map(String::as_str).unwrap_or(""))
+}
+
+fn os_family(marker: &str) -> &'static str {
+    let marker = marker.to_ascii_lowercase();
+    if marker == "windows"
+        || marker == "win32"
+        || marker == "win64"
+        || marker.starts_with("windows-")
+    {
+        "windows"
+    } else if marker == "linux" || marker.starts_with("linux-") {
+        "linux"
+    } else if marker == "macos"
+        || marker == "darwin"
+        || marker == "osx"
+        || marker.starts_with("macos-")
+        || marker.starts_with("darwin-")
+    {
+        "macos"
+    } else {
+        "other"
+    }
+}
+
+fn marks_other_os(name: &str, tags: &[String]) -> bool {
+    let name = name.to_ascii_lowercase();
+    let host = host_os(tags);
+    OS_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker) && os_family(marker) != host)
 }
 
 #[cfg(test)]
-pub fn select_zip<'a>(assets: &'a [GhAsset], tags: &[String]) -> Result<&'a GhAsset, String> {
+pub fn select_zip<'a>(
+    assets: &'a [GhAsset],
+    tags: &[String],
+) -> Result<Option<&'a GhAsset>, String> {
     let zips: Vec<&GhAsset> = assets
         .iter()
         .filter(|asset| asset.name.to_ascii_lowercase().ends_with(".zip"))
         .collect();
     if zips.is_empty() {
-        return Err("Aucun fichier .zip dans cette version.".to_string());
+        return Ok(None);
     }
     select_named(&zips, tags)
 }
@@ -385,6 +429,10 @@ mod tests {
         vec!["windows-x64".to_string(), "windows".to_string()]
     }
 
+    fn linux_tags() -> Vec<String> {
+        vec!["linux-x64".to_string(), "linux".to_string()]
+    }
+
     #[test]
     fn prefers_the_platform_zip() {
         let assets = vec![
@@ -392,22 +440,50 @@ mod tests {
             asset("dubdsr-1.2.50-windows-x64.zip"),
             asset("checksums.txt"),
         ];
-        let chosen = select_zip(&assets, &tags()).unwrap();
+        let chosen = select_zip(&assets, &tags()).unwrap().unwrap();
         assert_eq!(chosen.name, "dubdsr-1.2.50-windows-x64.zip");
+    }
+
+    #[test]
+    fn linux_prefers_the_linux_zip() {
+        let assets = vec![
+            asset("dubdsr-1.2.50-linux-x64.zip"),
+            asset("dubdsr-1.2.50-windows-x64.zip"),
+        ];
+        let chosen = select_zip(&assets, &linux_tags()).unwrap().unwrap();
+        assert_eq!(chosen.name, "dubdsr-1.2.50-linux-x64.zip");
     }
 
     #[test]
     fn a_single_exe_is_accepted_when_there_is_no_zip() {
         let assets = vec![asset("dubdsr1.2.1.exe")];
-        let chosen = select_package(&assets, &tags()).unwrap();
+        let chosen = select_package(&assets, &tags()).unwrap().unwrap();
         assert_eq!(chosen.name, "dubdsr1.2.1.exe");
     }
 
     #[test]
-    fn a_single_zip_is_accepted() {
+    fn a_single_untagged_zip_is_accepted_on_windows() {
         let assets = vec![asset("dubdsr1.2.50.zip")];
-        let chosen = select_zip(&assets, &tags()).unwrap();
+        let chosen = select_zip(&assets, &tags()).unwrap().unwrap();
         assert_eq!(chosen.name, "dubdsr1.2.50.zip");
+    }
+
+    #[test]
+    fn windows_only_zip_is_not_offered_on_linux() {
+        let assets = vec![asset("dubdsr-1.2.50-windows-x64.zip")];
+        assert!(select_zip(&assets, &linux_tags()).unwrap().is_none());
+    }
+
+    #[test]
+    fn untagged_zip_is_not_offered_on_linux() {
+        let assets = vec![asset("dubdsr1.2.50.zip")];
+        assert!(select_zip(&assets, &linux_tags()).unwrap().is_none());
+    }
+
+    #[test]
+    fn windows_exe_is_not_a_linux_package() {
+        let assets = vec![asset("dubdsr1.2.1.exe")];
+        assert!(select_package(&assets, &linux_tags()).unwrap().is_none());
     }
 
     #[test]
