@@ -10,6 +10,10 @@
       "title": "ATTENTION :Carte vidéo Nvidia (CUDA) requise !!!"
     },
     {
+      "id": "developpement",
+      "title": "Logiciels en cours de développement"
+    },
+    {
       "id": "general",
       "title": "Utilitaires astronomiques sans pré-requis"
     },
@@ -47,7 +51,7 @@
       "repo": "Creations-Daniel-Dube/dubGPUStack",
       "exe": "dubGPUStack.exe",
       "accent": "#ff9320",
-      "category": "bientot"
+      "category": "developpement"
     },
     {
       "id": "dubSeeStar",
@@ -57,7 +61,7 @@
       "repo": "Creations-Daniel-Dube/dubSeeStar",
       "exe": "dubGPUStack.exe",
       "accent": "#ff9320",
-      "category": "bientot"
+      "category": "developpement"
     },
     {
       "id": "dubDSLR",

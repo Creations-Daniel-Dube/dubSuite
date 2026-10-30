@@ -19,6 +19,7 @@ const MUTED: Color32 = Color32::from_rgb(0xa0, 0xa0, 0xaa);
 const ACCENT: Color32 = Color32::from_rgb(0xe6, 0xa8, 0x17);
 const DANGER: Color32 = Color32::from_rgb(0xe0, 0x6a, 0x5a);
 const CATEGORY_CUDA: Color32 = Color32::from_rgb(0xff, 0x3b, 0x3b);
+const CATEGORY_DEV: Color32 = Color32::from_rgb(0xd0, 0x8a, 0xff);
 const CATEGORY_GENERAL: Color32 = Color32::from_rgb(0x3d, 0xd6, 0x6c);
 const CATEGORY_COMING: Color32 = Color32::from_rgb(0xff, 0xdd, 0x33);
 
@@ -862,6 +863,7 @@ fn show_progress(ui: &mut egui::Ui, fraction: Option<f32>, label: &str) {
 fn category_title_color(id: &str) -> Color32 {
     match id {
         "cuda" => CATEGORY_CUDA,
+        "developpement" => CATEGORY_DEV,
         catalog::GENERAL_CATEGORY_ID => CATEGORY_GENERAL,
         "bientot" => CATEGORY_COMING,
         _ => MUTED,
