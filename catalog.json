@@ -20,6 +20,10 @@
     {
       "id": "bientot",
       "title": "À VENIR !"
+    },
+    {
+      "id": "projets",
+      "title": "futurs Projets (en études...)"
     }
   ],
   "apps": [
@@ -45,7 +49,7 @@
     },
     {
       "id": "dubGPUStack",
-      "name": "dubGPUStack (À VENIR)",
+      "name": "dubGPUStack (en cours de développement)",
       "mark": "Gs",
       "summary": "Empilement images astronomiques accéléré avec GPU",
       "repo": "Creations-Daniel-Dube/dubGPUStack",
@@ -55,7 +59,7 @@
     },
     {
       "id": "dubSeeStar",
-      "name": "dubSeeStar (À VENIR)",
+      "name": "dubSeeStar (en cours de développement)",
       "mark": "dSS",
       "summary": "Application de contrôle SeeStar Windows/Linux",
       "repo": "Creations-Daniel-Dube/dubSeeStar",
@@ -71,7 +75,7 @@
       "repo": "Creations-Daniel-Dube/dubDSLR",
       "exe": "dubDSLR.exe",
       "accent": "#ff9320",
-      "category": "bientot"
+      "category": "projets"
     }
   ]
 }
