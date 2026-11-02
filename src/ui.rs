@@ -81,7 +81,7 @@ pub fn run() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 720.0])
             .with_min_inner_size([760.0, 520.0])
-            .with_title("dubSuite")
+            .with_title(format!("dubSuite   v{}", env!("CARGO_PKG_VERSION")))
             .with_icon(crate::icon::app_icon()),
         centered: true,
         ..Default::default()
@@ -342,8 +342,6 @@ impl SuiteApp {
 
     fn header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("dubSuite").size(22.0).color(ACCENT).strong());
-            ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).color(MUTED));
             let width = ui.available_width();
             ui.allocate_ui_with_layout(
                 egui::vec2(width, 24.0),
