@@ -49,13 +49,13 @@
     },
     {
       "id": "dubGPUStack",
-      "name": "dubGPUStack (en cours de développement)",
+      "name": "dubGPUStack",
       "mark": "Gs",
       "summary": "Empilement images astronomiques accéléré avec GPU",
       "repo": "Creations-Daniel-Dube/dubGPUStack",
       "exe": "dubGPUStack.exe",
       "accent": "#ff9320",
-      "category": "developpement"
+      "category": "cuda"
     },
     {
       "id": "dubSeeStar",
