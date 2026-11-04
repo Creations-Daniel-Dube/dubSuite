@@ -63,7 +63,7 @@
       "mark": "dSS",
       "summary": "Application de contrôle SeeStar Windows/Linux",
       "repo": "Creations-Daniel-Dube/dubSeeStar",
-      "exe": "dubGPUStack.exe",
+      "exe": "dubSeeStar.exe",
       "accent": "#ff9320",
       "category": "developpement"
     },

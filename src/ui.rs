@@ -79,7 +79,7 @@ pub struct SuiteApp {
 pub fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1100.0, 720.0])
+            .with_inner_size([1460.0, 1000.0])
             .with_min_inner_size([760.0, 520.0])
             .with_title(format!("dubSuite   v{}", env!("CARGO_PKG_VERSION")))
             .with_icon(crate::icon::app_icon()),
@@ -447,8 +447,8 @@ impl SuiteApp {
         }
         let categories = self.catalog.categories.clone();
         let groups = catalog::group_apps(&categories, &apps);
-        let gap = 12.0;
-        let cols = ((ui.available_width() + gap) / (300.0 + gap))
+        let gap = 14.0;
+        let cols = ((ui.available_width() + gap) / (360.0 + gap))
             .floor()
             .max(1.0) as usize;
         let mut pending = Vec::new();
@@ -501,44 +501,49 @@ impl SuiteApp {
         Frame::NONE
             .fill(CARD)
             .stroke(Stroke::new(1.0, CARD_LINE))
-            .corner_radius(8.0)
-            .inner_margin(12.0)
+            .corner_radius(10.0)
+            .inner_margin(14.0)
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.set_width(288.0);
-                    ui.set_min_height(146.0);
+                    ui.set_width(346.0);
+                    ui.set_min_height(175.0);
                     ui.horizontal(|ui| {
                         self.app_badge(ui, app, accent);
-                        ui.label(RichText::new(&app.name).size(16.0).strong());
+                        ui.label(RichText::new(&app.name).size(19.0).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(badge(&query)).color(ACCENT).strong());
+                            ui.label(
+                                RichText::new(badge(&query))
+                                    .size(14.0)
+                                    .color(ACCENT)
+                                    .strong(),
+                            );
                         });
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(7.0);
                     ui.add(
-                        egui::Label::new(RichText::new(&app.summary).color(MUTED).size(13.0))
+                        egui::Label::new(RichText::new(&app.summary).color(MUTED).size(16.0))
                             .wrap(),
                     );
-                    ui.add_space(6.0);
+                    ui.add_space(7.0);
                     let (line, color) = status_line(&query);
-                    ui.add(egui::Label::new(RichText::new(line).color(color).size(12.0)).wrap());
+                    ui.add(egui::Label::new(RichText::new(line).color(color).size(14.0)).wrap());
                     if let Some(installed) = &installed {
                         ui.label(
                             RichText::new(format!("Installée : {}", installed.version))
                                 .color(MUTED)
-                                .size(12.0),
+                                .size(14.0),
                         );
                         if let Query::Ready(info) = &query {
                             if github::is_newer(&installed.version, &info.version) {
                                 ui.label(
                                     RichText::new("La version installée est plus récente.")
                                         .color(MUTED)
-                                        .size(12.0),
+                                        .size(14.0),
                                 );
                             }
                         }
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(10.0);
                     action = card_buttons(ui, &query, installed.as_ref(), own_job.as_ref(), busy);
                 });
             });
@@ -552,8 +557,8 @@ impl SuiteApp {
         };
         ui.add(
             egui::Image::from_texture(texture)
-                .fit_to_exact_size(Vec2::splat(36.0))
-                .corner_radius(6.0)
+                .fit_to_exact_size(Vec2::splat(52.0))
+                .corner_radius(8.0)
                 .bg_fill(CARD),
         );
     }
@@ -804,13 +809,13 @@ fn installed_buttons(ui: &mut egui::Ui, can_update: bool, busy: bool) -> Option<
         }
         let width = ui.available_width();
         if ui
-            .add_sized(Vec2::new(width, 28.0), egui::Button::new("OUVRIR"))
+            .add_sized(Vec2::new(width, 34.0), egui::Button::new("OUVRIR"))
             .clicked()
         {
             action = Some(CardAction::Open);
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(5.0);
     if centered_button(ui, !busy, "DÉSINSTALLER", Some(ui.available_width())).clicked() {
         action = Some(CardAction::Uninstall);
     }
@@ -829,7 +834,7 @@ fn centered_button(
         egui::Atom::grow(),
     ));
     if let Some(width) = width {
-        button = button.min_size(Vec2::new(width, 24.0));
+        button = button.min_size(Vec2::new(width, 29.0));
     }
     ui.add_enabled(enabled, button)
 }
@@ -838,13 +843,13 @@ fn wide_button(ui: &mut egui::Ui, enabled: bool, text: impl Into<egui::WidgetTex
     let width = ui.available_width();
     ui.add_enabled(
         enabled,
-        egui::Button::new(text).min_size(Vec2::new(width, 28.0)),
+        egui::Button::new(text).min_size(Vec2::new(width, 34.0)),
     )
     .clicked()
 }
 
 fn show_progress(ui: &mut egui::Ui, fraction: Option<f32>, label: &str) {
-    ui.label(RichText::new(label).color(MUTED).size(12.0));
+    ui.label(RichText::new(label).color(MUTED).size(14.0));
     match fraction {
         Some(value) => {
             ui.add(egui::ProgressBar::new(value.clamp(0.0, 1.0)).show_percentage());
@@ -920,6 +925,7 @@ fn load_app_icons(ctx: &egui::Context) -> std::collections::HashMap<String, egui
     const ICONS: &[(&str, &[u8])] = &[
         ("dubdsr", include_bytes!("../images/dubdsr.png")),
         ("dubfocus", include_bytes!("../images/dubFocus.png")),
+        ("dubGPUStack", include_bytes!("../images/dubGPUStack.png")),
     ];
     let mut icons = std::collections::HashMap::new();
     for (id, bytes) in ICONS {
@@ -955,13 +961,13 @@ fn decode_icon(ctx: &egui::Context, id: &str, bytes: &[u8]) -> Option<egui::Text
 }
 
 fn mark_tile(ui: &mut egui::Ui, accent: Color32, mark: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 6.0, accent);
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(52.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 8.0, accent);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         mark,
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(19.0),
         Color32::from_rgb(0x14, 0x10, 0x08),
     );
 }
