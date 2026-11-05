@@ -10,7 +10,7 @@ use crate::catalog::{self, AppEntry};
 use crate::github::{self, ReleaseInfo, RemoteFile};
 use crate::state::{self, Installed};
 
-const MAX_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub enum Run<T> {
     Done(T),
@@ -450,7 +450,7 @@ fn download(
     mut on_progress: impl FnMut(Option<f32>),
 ) -> Run<String> {
     if file.size > MAX_BYTES {
-        return Run::Failed("Le paquet dépasse 1 Gio.".to_string());
+        return Run::Failed("Le paquet dépasse 2 Gio.".to_string());
     }
     if let Some(parent) = dest.parent() {
         if let Err(err) = fs::create_dir_all(parent) {
@@ -512,7 +512,7 @@ fn download(
         if got.saturating_add(read as u64) > MAX_BYTES {
             drop(output);
             let _ = fs::remove_file(dest);
-            return Run::Failed("Le paquet dépasse 1 Gio.".to_string());
+            return Run::Failed("Le paquet dépasse 2 Gio.".to_string());
         }
         if let Err(err) = output.write_all(&buf[..read]) {
             drop(output);
