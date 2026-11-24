@@ -68,6 +68,16 @@
       "category": "developpement"
     },
     {
+      "id": "dubAstroLog",
+      "name": "dubAstroLog (en cours de développement)",
+      "mark": "dAL",
+      "summary": "Application de logs d'observations Astronomique Windows/Linux",
+      "repo": "Creations-Daniel-Dube/dubastrolog",
+      "exe": "dubastrolog.exe",
+      "accent": "#ff9320",
+      "category": "developpement"
+    },
+    {
       "id": "dubDSLR",
       "name": "dubDSLR (À VENIR)",
       "mark": "dSS",
