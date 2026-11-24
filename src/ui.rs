@@ -926,6 +926,7 @@ fn load_app_icons(ctx: &egui::Context) -> std::collections::HashMap<String, egui
         ("dubdsr", include_bytes!("../images/dubdsr.png")),
         ("dubfocus", include_bytes!("../images/dubFocus.png")),
         ("dubGPUStack", include_bytes!("../images/dubGPUStack.png")),
+        ("dubAstroLog", include_bytes!("../images/dubAstroLog.png")),
     ];
     let mut icons = std::collections::HashMap::new();
     for (id, bytes) in ICONS {

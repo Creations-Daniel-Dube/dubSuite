@@ -6,16 +6,16 @@
   },
   "categories": [
     {
+      "id": "general",
+      "title": "Utilitaires astronomiques sans pré-requis"
+    },    
+    {
       "id": "cuda",
       "title": "ATTENTION :Carte vidéo Nvidia (CUDA) requise !!!"
     },
     {
       "id": "developpement",
       "title": "Logiciels en cours de développement"
-    },
-    {
-      "id": "general",
-      "title": "Utilitaires astronomiques sans pré-requis"
     },
     {
       "id": "bientot",
@@ -69,13 +69,13 @@
     },
     {
       "id": "dubAstroLog",
-      "name": "dubAstroLog (en cours de développement)",
+      "name": "dubAstroLog (Pré-Bêta)",
       "mark": "dAL",
       "summary": "Application de logs d'observations Astronomique Windows/Linux",
       "repo": "Creations-Daniel-Dube/dubastrolog",
       "exe": "dubastrolog.exe",
       "accent": "#ff9320",
-      "category": "developpement"
+      "category": "general"
     },
     {
       "id": "dubDSLR",
