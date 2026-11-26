@@ -360,14 +360,166 @@ pub fn installed_exe(id: &str, relative: &str) -> Option<PathBuf> {
     full.is_file().then_some(full)
 }
 
+/// Retire un second répertoire central collé après une archive déjà fermée.
+/// Ce second répertoire a des tailles fausses : le décompresseur lit trop loin
+/// et échoue avec « Invalid checksum », alors que le premier exemplaire est intact.
+fn zip_without_trailing_directory(bytes: &[u8]) -> &[u8] {
+    let Some(pos) = bytes.windows(4).rposition(|mark| mark == b"PK\x05\x06") else {
+        return bytes;
+    };
+    if eocd_kind(bytes, pos) != Some(EocdKind::Mismatch) {
+        return bytes;
+    }
+    let mut from = 0;
+    let mut keep = None;
+    while from + 22 <= pos {
+        let Some(rel) = bytes[from..pos]
+            .windows(4)
+            .position(|mark| mark == b"PK\x05\x06")
+        else {
+            break;
+        };
+        let earlier = from + rel;
+        if eocd_kind(bytes, earlier) == Some(EocdKind::Matches) {
+            keep = eocd_end(bytes, earlier);
+        }
+        from = earlier + 1;
+    }
+    match keep {
+        Some(end) if end < bytes.len() => &bytes[..end],
+        _ => bytes,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EocdKind {
+    Matches,
+    Mismatch,
+}
+
+fn eocd_kind(bytes: &[u8], pos: usize) -> Option<EocdKind> {
+    let (entries, cd_off, cd_end) = eocd_layout(bytes, pos)?;
+    let mut cursor = cd_off;
+    let mut matched = true;
+    for _ in 0..entries {
+        let (next, same) = cd_entry(bytes, cursor, cd_end, cd_off)?;
+        if !same {
+            matched = false;
+        }
+        cursor = next;
+    }
+    if cursor != cd_end {
+        return None;
+    }
+    Some(if matched {
+        EocdKind::Matches
+    } else {
+        EocdKind::Mismatch
+    })
+}
+
+fn eocd_end(bytes: &[u8], pos: usize) -> Option<usize> {
+    let comment = u16_at(bytes, pos + 20)? as usize;
+    pos.checked_add(22)?.checked_add(comment)
+}
+
+/// (nombre d'entrées, début du répertoire, fin du répertoire).
+fn eocd_layout(bytes: &[u8], pos: usize) -> Option<(usize, usize, usize)> {
+    if pos + 22 > bytes.len() || &bytes[pos..pos + 4] != b"PK\x05\x06" {
+        return None;
+    }
+    let end = eocd_end(bytes, pos)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let entries_here = u16_at(bytes, pos + 8)?;
+    let entries = u16_at(bytes, pos + 10)?;
+    let cd_size = u32_at(bytes, pos + 12)?;
+    let cd_off = u32_at(bytes, pos + 16)?;
+    if entries == 0
+        || entries == 0xffff
+        || entries != entries_here
+        || cd_size == 0xffff_ffff
+        || cd_off == 0xffff_ffff
+    {
+        return None;
+    }
+    let cd_off = cd_off as usize;
+    let cd_end = cd_off.checked_add(cd_size as usize)?;
+    if cd_end != pos || entries > 10_000 {
+        return None;
+    }
+    Some((entries as usize, cd_off, cd_end))
+}
+
+/// (`curseur` après l'entrée, tailles identiques à l'en-tête local).
+fn cd_entry(bytes: &[u8], cursor: usize, cd_end: usize, cd_off: usize) -> Option<(usize, bool)> {
+    if cursor + 46 > cd_end || &bytes[cursor..cursor + 4] != b"PK\x01\x02" {
+        return None;
+    }
+    let flags = u16_at(bytes, cursor + 8)?;
+    let crc = u32_at(bytes, cursor + 16)?;
+    let compressed = u32_at(bytes, cursor + 20)? as usize;
+    let uncompressed = u32_at(bytes, cursor + 24)?;
+    let name_len = u16_at(bytes, cursor + 28)? as usize;
+    let extra_len = u16_at(bytes, cursor + 30)? as usize;
+    let comment_len = u16_at(bytes, cursor + 32)? as usize;
+    let local_off = u32_at(bytes, cursor + 42)? as usize;
+    let name_at = cursor + 46;
+    let next = name_at
+        .checked_add(name_len)?
+        .checked_add(extra_len)?
+        .checked_add(comment_len)?;
+    if next > cd_end {
+        return None;
+    }
+    if flags & 0x8 != 0 {
+        return Some((next, false));
+    }
+    if local_off + 30 > bytes.len() || &bytes[local_off..local_off + 4] != b"PK\x03\x04" {
+        return Some((next, false));
+    }
+    let local_flags = u16_at(bytes, local_off + 6)?;
+    let local_crc = u32_at(bytes, local_off + 14)?;
+    let local_compressed = u32_at(bytes, local_off + 18)? as usize;
+    let local_uncompressed = u32_at(bytes, local_off + 22)?;
+    let local_name_len = u16_at(bytes, local_off + 26)? as usize;
+    let local_extra = u16_at(bytes, local_off + 28)? as usize;
+    let local_name_at = local_off + 30;
+    let local_name_end = local_name_at.checked_add(local_name_len)?;
+    let data_end = local_name_end.checked_add(local_extra)?.checked_add(local_compressed)?;
+    let name_matches = local_name_end <= bytes.len()
+        && bytes.get(local_name_at..local_name_end) == bytes.get(name_at..name_at + name_len);
+    let same = local_flags & 0x8 == 0
+        && name_matches
+        && local_crc == crc
+        && local_compressed == compressed
+        && local_uncompressed == uncompressed
+        && data_end <= cd_off;
+    Some((next, same))
+}
+
+fn u16_at(bytes: &[u8], index: usize) -> Option<u16> {
+    let chunk = bytes.get(index..index + 2)?;
+    Some(u16::from_le_bytes([chunk[0], chunk[1]]))
+}
+
+fn u32_at(bytes: &[u8], index: usize) -> Option<u32> {
+    let chunk = bytes.get(index..index + 4)?;
+    Some(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+}
+
 pub fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     if dest.exists() {
         fs::remove_dir_all(dest).map_err(|err| state::io_fr("Dossier temporaire", &err))?;
     }
     fs::create_dir_all(dest).map_err(|err| state::io_fr("Dossier temporaire", &err))?;
-    let file = fs::File::open(zip_path).map_err(|err| state::io_fr("Ouverture du paquet", &err))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|err| format!("Archive illisible : {err}"))?;
+    let bytes = fs::read(zip_path).map_err(|err| state::io_fr("Ouverture du paquet", &err))?;
+    // Un second répertoire central, ajouté après une archive déjà close, fait échouer
+    // la lecture (« Invalid checksum ») alors que le premier exemplaire est intact.
+    let bytes = zip_without_trailing_directory(&bytes);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|err| format!("Archive illisible : {err}"))?;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
@@ -675,6 +827,60 @@ mod tests {
         assert_eq!(
             locate_exe(&dest, "dubdsr.exe").unwrap(),
             PathBuf::from("dubdsr.exe")
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_ignores_a_second_central_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "dubsuite-zip-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("app.zip");
+        {
+            let file = fs::File::create(&zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("dubSuite.exe", opts).unwrap();
+            zip.write_all(b"bonjour le lanceur").unwrap();
+            zip.finish().unwrap();
+        }
+        let mut bytes = fs::read(&zip_path).unwrap();
+        let tail = bytes
+            .windows(4)
+            .rposition(|mark| mark == b"PK\x05\x06")
+            .unwrap();
+        let cd_off = u32_at(&bytes, tail + 16).unwrap() as usize;
+        let mut trailer = bytes[cd_off..].to_vec();
+        let compressed = u32_at(&trailer, 20).unwrap();
+        trailer[16..20].copy_from_slice(&0u32.to_le_bytes());
+        trailer[20..24].copy_from_slice(&(compressed + 64).to_le_bytes());
+        let plain = u32_at(&trailer, 24).unwrap();
+        trailer[24..28].copy_from_slice(&(plain + 8).to_le_bytes());
+        let new_cd = (bytes.len() + 32) as u32;
+        let eocd_at = trailer.len() - 22;
+        trailer[eocd_at + 16..eocd_at + 20].copy_from_slice(&new_cd.to_le_bytes());
+        bytes.extend_from_slice(&[7u8; 32]);
+        bytes.extend_from_slice(&trailer);
+        fs::write(&zip_path, &bytes).unwrap();
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).unwrap();
+        let mut entry = archive.by_index(0).unwrap();
+        let mut dumped = Vec::new();
+        assert!(std::io::copy(&mut entry, &mut dumped).is_err());
+
+        let dest = dir.join("out");
+        extract_zip(&zip_path, &dest).unwrap();
+        assert_eq!(
+            fs::read(dest.join("dubSuite.exe")).unwrap(),
+            b"bonjour le lanceur"
         );
         let _ = fs::remove_dir_all(&dir);
     }
