@@ -77,7 +77,7 @@
       "accent": "#ff9320",
       "category": "general"
     },
-      "id": "dubPlanetar",
+    {  "id": "dubPlanetar",
       "name": "dubPlanetar (Bêta)",
       "mark": "dPL",
       "summary": "Application de bureau pour visualiser les planètes et la Lune telles qu'elles apparaîtraient dans un télescope, à un instant donné, avec les vraies tailles angulaires et les phases d'éclairage.",
