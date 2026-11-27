@@ -141,6 +141,14 @@ impl SuiteApp {
         if let Some(text) = state::take_update_error() {
             app.notice = Some(Notice { error: true, text });
         }
+        // #region agent log
+        state::agent_debug_log(
+            "H0",
+            "ui.rs:SuiteApp::new",
+            "about to spawn_refresh",
+            serde_json::json!({ "appCount": app.catalog.apps.len() }),
+        );
+        // #endregion
         worker::spawn_refresh(cc.egui_ctx.clone(), app.wave, settings, tx);
         app
     }
@@ -701,9 +709,29 @@ impl SuiteApp {
             self.settings.github_token = self.draft_token.trim().to_string();
         }
         if let Err(err) = state::save_settings(&self.settings) {
+            // #region agent log
+            state::agent_debug_log(
+                "H5",
+                "ui.rs:save_settings",
+                "save_settings failed",
+                serde_json::json!({ "error": err }),
+            );
+            // #endregion
             self.settings_error = Some(err);
             return;
         }
+        // #region agent log
+        state::agent_debug_log(
+            "H5",
+            "ui.rs:save_settings",
+            "save_settings ok",
+            serde_json::json!({
+                "tokenLen": self.settings.github_token.trim().len(),
+                "catalogUrlLen": self.settings.catalog_url.trim().len(),
+                "clearedToken": self.clear_token,
+            }),
+        );
+        // #endregion
         self.draft_token.clear();
         self.clear_token = false;
         self.settings_error = None;

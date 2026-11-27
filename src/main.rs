@@ -9,6 +9,16 @@ mod ui;
 mod worker;
 
 fn main() -> eframe::Result {
+    // #region agent log
+    std::panic::set_hook(Box::new(|info| {
+        state::agent_debug_log(
+            "H6",
+            "main.rs:panic",
+            "process panicked",
+            serde_json::json!({ "info": info.to_string() }),
+        );
+    }));
+    // #endregion
     if let Some(target) = update_target() {
         let code = match install::apply_staged_update(&target) {
             Ok(()) => 0,

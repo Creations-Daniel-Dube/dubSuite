@@ -64,7 +64,23 @@ pub fn cache_dir() -> PathBuf {
 }
 
 pub fn load_settings() -> Settings {
-    read_json(&data_dir().join("settings.json")).unwrap_or_default()
+    let path = data_dir().join("settings.json");
+    let exists = path.is_file();
+    let settings: Settings = read_json(&path).unwrap_or_default();
+    // #region agent log
+    agent_debug_log(
+        "H1",
+        "state.rs:load_settings",
+        "loaded settings",
+        serde_json::json!({
+            "settingsPath": path.display().to_string(),
+            "settingsFileExists": exists,
+            "catalogUrlLen": settings.catalog_url.trim().len(),
+            "tokenLen": settings.github_token.trim().len(),
+        }),
+    );
+    // #endregion
+    settings
 }
 
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
@@ -108,12 +124,84 @@ pub fn take_update_error() -> Option<String> {
 }
 
 pub fn effective_token(settings: &Settings) -> String {
-    std::env::var("DUBSUITE_GITHUB_TOKEN")
+    let from_env = std::env::var("DUBSUITE_GITHUB_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| settings.github_token.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let token = from_env
+        .clone()
+        .unwrap_or_else(|| settings.github_token.trim().to_string());
+    // #region agent log
+    agent_debug_log(
+        "H1",
+        "state.rs:effective_token",
+        "resolved github token source",
+        serde_json::json!({
+            "fromEnv": from_env.is_some(),
+            "tokenLen": token.len(),
+            "settingsTokenLen": settings.github_token.trim().len(),
+        }),
+    );
+    // #endregion
+    token
 }
+
+// #region agent log
+pub(crate) fn agent_debug_log(
+    hypothesis_id: &str,
+    location: &str,
+    message: &str,
+    data: serde_json::Value,
+) {
+    use std::io::Write;
+    #[derive(Serialize)]
+    struct Entry<'a> {
+        sessionId: &'static str,
+        hypothesisId: &'a str,
+        location: &'a str,
+        message: &'a str,
+        data: serde_json::Value,
+        timestamp: u128,
+        runId: &'static str,
+    }
+    let Ok(line) = serde_json::to_string(&Entry {
+        sessionId: "da2fc9",
+        hypothesisId: hypothesis_id,
+        location,
+        message,
+        data,
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+        runId: "pre-fix",
+    }) else {
+        return;
+    };
+    let log_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.cursor/debug-da2fc9.log"
+    ));
+    if let Some(parent) = log_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+    let fallback = data_dir().join("debug-da2fc9.log");
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&fallback)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+// #endregion
 
 pub fn check_catalog_url(url: &str) -> Result<(), String> {
     let url = url.trim();

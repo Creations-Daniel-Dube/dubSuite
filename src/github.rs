@@ -56,6 +56,7 @@ pub fn fetch_latest(repo: &str, token: &str) -> Result<Option<ReleaseInfo>, Stri
     if let Some(value) = auth_header(token) {
         request = request.header(AUTHORIZATION, value);
     }
+    let auth_sent = auth_header(token).is_some();
     let response = request
         .send()
         .map_err(|err| format!("GitHub injoignable : {err}"))?;
@@ -64,8 +65,34 @@ pub fn fetch_latest(repo: &str, token: &str) -> Result<Option<ReleaseInfo>, Stri
         return Ok(None);
     }
     if !status.is_success() {
+        let rate_reset = response
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
         let body = response.text().unwrap_or_default();
-        return Err(http_error(status.as_u16(), &body));
+        // #region agent log
+        let body_hint = body
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r')
+            .take(120)
+            .collect::<String>();
+        let rate_limited = body.contains("rate limit");
+        crate::state::agent_debug_log(
+            if rate_limited { "H3" } else { "H2" },
+            "github.rs:fetch_latest",
+            "github releases/latest failed",
+            serde_json::json!({
+                "repo": repo,
+                "status": status.as_u16(),
+                "authSent": auth_sent,
+                "tokenLen": token.len(),
+                "rateLimited": rate_limited,
+                "bodyHint": body_hint,
+            }),
+        );
+        // #endregion
+        return Err(http_error(status.as_u16(), &body, rate_reset));
     }
     let release: GhRelease = response
         .json()
@@ -362,7 +389,18 @@ pub fn auth_header(token: &str) -> Option<HeaderValue> {
     if token.is_empty() {
         return None;
     }
-    HeaderValue::from_str(&format!("Bearer {token}")).ok()
+    let value = HeaderValue::from_str(&format!("Bearer {token}"));
+    // #region agent log
+    if value.is_err() {
+        crate::state::agent_debug_log(
+            "H4",
+            "github.rs:auth_header",
+            "token rejected for Authorization header",
+            serde_json::json!({ "tokenLen": token.len() }),
+        );
+    }
+    // #endregion
+    value.ok()
 }
 
 fn checksum_asset<'a>(assets: &'a [GhAsset], zip_name: &str) -> Option<&'a GhAsset> {
@@ -394,8 +432,31 @@ fn is_hex64(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn http_error(status: u16, body: &str) -> String {
-    if status == 401 || status == 403 {
+fn http_error(status: u16, body: &str, rate_reset: Option<u64>) -> String {
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("rate limit") {
+        let minutes = rate_reset.and_then(|reset| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some(reset.saturating_sub(now).div_ceil(60))
+        });
+        return match minutes {
+            Some(mins) => format!(
+                "Trop de consultations GitHub. Réessayez dans {mins} min, avec un seul clic sur Actualiser."
+            ),
+            None => "Trop de consultations GitHub. Attendez, puis un seul clic sur Actualiser."
+                .to_string(),
+        };
+    }
+    if status == 401 {
+        return "Jeton GitHub refusé (401). Vérifiez le jeton dans Catalogue…".to_string();
+    }
+    if status == 403 {
+        if lower.contains("bad credentials") || lower.contains("invalid") {
+            return "Jeton GitHub invalide (403). Saisissez-en un nouveau dans Catalogue…".to_string();
+        }
         return format!(
             "Accès refusé par GitHub ({status}). Pour un dépôt privé, ajoutez un jeton dans Catalogue…"
         );
@@ -498,6 +559,13 @@ mod tests {
     #[test]
     fn french_date_reads_the_release_timestamp() {
         assert_eq!(french_date("2026-10-26T15:04:05Z"), "26 oct. 2026");
+    }
+
+    #[test]
+    fn http_error_explains_rate_limit() {
+        let body = r#"{"message":"API rate limit exceeded for 203.0.113.1."}"#;
+        let msg = http_error(403, body, Some(u64::MAX));
+        assert!(msg.contains("Trop de consultations"));
     }
 
     #[test]

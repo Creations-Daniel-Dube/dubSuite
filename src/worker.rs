@@ -45,7 +45,23 @@ pub fn spawn_refresh(ctx: egui::Context, wave: u64, settings: Settings, tx: Send
     let _ = std::thread::Builder::new()
         .name("dubsuite-refresh".into())
         .spawn(move || {
+            // #region agent log
+            state::agent_debug_log(
+                "H0",
+                "worker.rs:spawn_refresh",
+                "refresh worker started",
+                serde_json::json!({ "appCount": 0 }),
+            );
+            // #endregion
             let loaded = crate::catalog::load(&settings);
+            // #region agent log
+            state::agent_debug_log(
+                "H0",
+                "worker.rs:spawn_refresh",
+                "catalog loaded",
+                serde_json::json!({ "appCount": loaded.catalog.apps.len() }),
+            );
+            // #endregion
             let token = state::effective_token(&settings);
             send(
                 &ctx,
@@ -56,11 +72,20 @@ pub fn spawn_refresh(ctx: egui::Context, wave: u64, settings: Settings, tx: Send
                 },
             );
             let mut items = Vec::with_capacity(loaded.catalog.apps.len());
+            let mut blocked: Option<String> = None;
             for app in &loaded.catalog.apps {
-                items.push((
-                    app.id.clone(),
-                    crate::github::fetch_latest(&app.repo, &token),
-                ));
+                let result = if let Some(message) = &blocked {
+                    Err(message.clone())
+                } else {
+                    match crate::github::fetch_latest(&app.repo, &token) {
+                        Err(message) if message.contains("Trop de consultations") => {
+                            blocked = Some(message.clone());
+                            Err(message)
+                        }
+                        other => other,
+                    }
+                };
+                items.push((app.id.clone(), result));
             }
             let repo = loaded.catalog.launcher.repo.trim().to_string();
             send(&ctx, &tx, Msg::Releases { wave, items });
